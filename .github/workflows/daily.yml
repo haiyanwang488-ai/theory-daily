@@ -5,6 +5,11 @@ on:
     # UTC 00:30 = 北京时间 08:30
     - cron: "30 0 * * *"
   workflow_dispatch: # 支持手动触发，方便调试
+    inputs:
+      force:
+        description: "强制推送（忽略今天已推过的记录，仅用于首次验证）"
+        type: boolean
+        default: false
 
 permissions:
   contents: write # 提交数据库
@@ -35,7 +40,7 @@ jobs:
         env:
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
           TZ: Asia/Shanghai
-        run: python morning.py
+        run: python morning.py ${{ inputs.force == true && '--force' || '' }}
 
       - name: 提交数据库
         run: |
