@@ -23,6 +23,7 @@ class Source:
     note: str = ""
     dynamic: Optional[str] = None   # 需要先解析版面导航的源（人民日报电子版）
     weight: int = 50                # 排序权重，理论属性越强越高
+    needs_browser: bool = False     # 纯前端 SPA，必须用浏览器渲染
 
     def match_href(self, href: str) -> Optional[re.Match]:
         return re.search(self.href_re, href)
@@ -125,6 +126,42 @@ SOURCES: list[Source] = [
         note="当日纸质版理论版全文，版面号按日期自动定位",
         weight=96,
         dynamic="rmrb_layout",
+    ),
+    # ---- 上观新闻旗下（纯前端 SPA，必须浏览器渲染；日期靠列表页相对时间换算）----
+    Source(
+        key="jfdaily",
+        name="解放日报 · 思想",
+        short="解放日报",
+        homepage="https://www.jfdaily.com/",
+        list_urls=[
+            "https://www.jfdaily.com/staticsg/res/html/web/section.html?id=62&v=2.2",       # 思想
+            "https://www.jfdaily.com/staticsg/res/html/web/subsection.html?id=57&v=2.2",    # 思想汇（理论主阵地）
+            "https://www.jfdaily.com/staticsg/res/html/web/subsection.html?id=135&v=2.2",   # 观点评论
+        ],
+        href_re=r"newsDetail\.html\?id=(\d+)",
+        base="https://www.jfdaily.com/staticsg/res/html/web/",
+        date_from_href="",  # 列表页只有相对时间，由 parse_observed 处理
+        section="思想",
+        note="上海市委机关报，思想周刊、思想汇与观点评论",
+        weight=82,
+        needs_browser=True,
+    ),
+    Source(
+        key="whb",
+        name="文汇报 · 学人",
+        short="文汇报",
+        homepage="https://www.whb.cn/",
+        list_urls=[
+            "https://www.jfdaily.com/staticsg/res/html/web/subsection.html?id=353&v=2.2",   # 文汇学人
+            "https://www.jfdaily.com/staticsg/res/html/web/subsection.html?id=349&v=2.2",   # 文汇文艺评论
+        ],
+        href_re=r"newsDetail\.html\?id=(\d+)",
+        base="https://www.jfdaily.com/staticsg/res/html/web/",
+        date_from_href="",
+        section="学人",
+        note="文汇学人、文汇文艺评论，偏人文社科学术",
+        weight=80,
+        needs_browser=True,
     ),
 ]
 

@@ -7,6 +7,7 @@ import hashlib
 import re
 import sqlite3
 import sys
+import threading
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -15,6 +16,7 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
+import browser
 from sources import BY_KEY, SOURCES, Source, classify, clean_title, is_news, is_video, parse_date
 
 ROOT = Path(__file__).resolve().parent
@@ -127,7 +129,108 @@ def rmrb_theory_pages(today: date) -> list[str]:
     return list(dict.fromkeys(pages))
 
 
+# ------------------------------------------------- 上观系（解放日报 / 文汇报）
+
+REL_MIN_RE = re.compile(r"(\d+)\s*分钟前")
+REL_HOUR_RE = re.compile(r"(\d+)\s*小时前")
+REL_DAY_RE = re.compile(r"(\d+)\s*天前")
+ABS_DATE_RE = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})")
+
+
+def parse_rel_time(txt: str, now: datetime) -> str | None:
+    """把「12小时前 / 1天前 / 昨天 / 2026-10-15」换算成 YYYY-MM-DD。"""
+    t = txt or ""
+    m = ABS_DATE_RE.search(t)
+    if m:
+        y, mo, d = m.groups()
+        return f"{int(y):04d}-{int(mo):02d}-{int(d):02d}"
+    m = REL_MIN_RE.search(t)
+    if m:
+        return (now - timedelta(minutes=int(m.group(1)))).date().isoformat()
+    m = REL_HOUR_RE.search(t)
+    if m:
+        return (now - timedelta(hours=int(m.group(1)))).date().isoformat()
+    m = REL_DAY_RE.search(t)
+    if m:
+        return (now - timedelta(days=int(m.group(1)))).date().isoformat()
+    if "刚刚" in t:
+        return now.date().isoformat()
+    if "昨天" in t:
+        return (now - timedelta(days=1)).date().isoformat()
+    if "前天" in t:
+        return (now - timedelta(days=2)).date().isoformat()
+    return None
+
+
+def _attrs_of(a) -> str:
+    """找到标题链接对应的时间/栏目容器，返回其文本。"""
+    p = a.parent
+    for _ in range(3):
+        if p is None:
+            break
+        el = p.select_one(".attrs") if hasattr(p, "select_one") else None
+        if el:
+            return el.get_text(" ", strip=True)
+        p = p.parent
+    sib = a.find_next_sibling(class_="attrs")
+    if sib:
+        return sib.get_text(" ", strip=True)
+    return ""
+
+
+def parse_observed(src: Source, html: str, page_url: str, days_back: int = 2) -> list[dict]:
+    """上观新闻列表页：a.title + 同级 .attrs（含栏目名与相对时间）。"""
+    soup = BeautifulSoup(html, "lxml")
+    now = datetime.now()
+    cutoff = (date.today() - timedelta(days=days_back)).isoformat()
+    best: dict[str, dict] = {}
+
+    for a in soup.select("a[href*='newsDetail.html?id=']"):
+        m = re.search(r"newsDetail\.html\?id=(\d+)", a["href"])
+        if not m:
+            continue
+        aid = m.group(1)
+        title = clean_title(a.get_text(" ", strip=True))
+        if len(title) < 6:
+            continue
+        pub = parse_rel_time(_attrs_of(a), now)
+        url = urljoin(src.base, f"newsDetail.html?id={aid}&sid=200")
+        cand = {
+            "id": _id(url),
+            "source": src.key,
+            "source_name": src.name,
+            "title": title,
+            "url": url,
+            "pub_date": pub or "",
+            "section": src.section,
+            "chars": 0,
+            "summary": "",
+        }
+        prev = best.get(aid)
+        if prev is None or len(cand["title"]) > len(prev["title"]) or (pub and not prev["pub_date"]):
+            best[aid] = cand
+
+    return [c for c in best.values() if not c["pub_date"] or c["pub_date"] >= cutoff]
+
+
+def collect_browser(src: Source, days_back: int = 2) -> list[dict]:
+    items: list[dict] = []
+    for u in src.list_urls:
+        html = browser.render(u)
+        if not html:
+            print(f"  ! 列表页渲染失败 {u}", file=sys.stderr)
+            continue
+        got = parse_observed(src, html, u, days_back)
+        print(f"    频道 {u.split('id=')[-1][:3]}: {len(got)} 条", flush=True)
+        items.extend(got)
+    uniq = {x["url"]: x for x in items}
+    return list(uniq.values())
+
+
 def collect(src: Source, days_back: int = 2) -> list[dict]:
+    if src.needs_browser:
+        return collect_browser(src, days_back)
+
     cutoff = (date.today() - timedelta(days=days_back)).isoformat()
     items: list[dict] = []
 
@@ -154,7 +257,55 @@ def _clean(t: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
+SHARE_RE = re.compile(r"打开微信.*?朋友圈。?|点击底部的\s*“?发现”?.*?扫一扫")
+
+
+def enrich_browser(item: dict) -> dict:
+    """上观系详情页：正文在 div.news-content，发布时间形如 2026-10-21 06:30。
+
+    正文异步渲染，首次可能抓空，失败时加长等待重试一次。
+    """
+    soup = None
+    body = None
+    for attempt, wait in enumerate((3000, 5500)):
+        html = browser.render(item["url"], wait_ms=wait)
+        if not html:
+            continue
+        soup = BeautifulSoup(html, "lxml")
+        body = soup.select_one("div.news-content") or soup.select_one("div.article")
+        if body is not None and len(body.get_text(strip=True)) > 200:
+            break
+
+    if soup is None:
+        item["summary"] = ""
+        item["chars"] = 0
+        return item
+
+    if soup.title:
+        t = clean_title(re.split(r"[_|｜]", soup.title.get_text())[0])
+        if len(t) > len(item["title"]):
+            item["title"] = t
+
+    m = re.search(r"(20\d{2}-\d{2}-\d{2})\s+\d{1,2}:\d{2}", str(soup))
+    if m:
+        item["pub_date"] = m.group(1)
+    if not item.get("pub_date"):
+        item["pub_date"] = date.today().isoformat()
+
+    text = body.get_text(" ", strip=True) if body is not None else ""
+    text = SHARE_RE.sub("", text)
+    text = _clean(text)
+    item["chars"] = len(text)
+    paras = [p for p in re.split(r"(?<=。)\s*", text) if len(p) > 20]
+    item["summary"] = _clean("".join(paras)[:320])
+    return item
+
+
 def enrich(item: dict) -> dict:
+    src = BY_KEY.get(item.get("source"))
+    if src is not None and src.needs_browser:
+        return enrich_browser(item)
+
     html = get(item["url"], tries=2, timeout=18)
     if not html:
         item["summary"] = ""
@@ -252,7 +403,12 @@ def save(conn: sqlite3.Connection, items: list[dict]) -> int:
     return n
 
 
-def run(days_back: int = 2, enrich_limit: int = 120, workers: int = 4) -> tuple[int, int]:
+def run(
+    days_back: int = 2,
+    enrich_limit: int = 120,
+    workers: int = 4,
+    browser_limit: int = 40,
+) -> tuple[int, int]:
     conn = db()
     known = existing_ids(conn)
     all_new: list[dict] = []
@@ -268,19 +424,29 @@ def run(days_back: int = 2, enrich_limit: int = 120, workers: int = 4) -> tuple[
         print(f"  {src.short}: 列表 {len(items)} 条，新增 {len(fresh)} 条", flush=True)
         all_new.extend(fresh)
 
-    # 详情页补全（控制总量，避免一次性打太多请求）
     if all_new:
-        todo = sorted(all_new, key=lambda x: x["pub_date"], reverse=True)[:enrich_limit]
-        print(f"补全详情 {len(todo)} 篇…", flush=True)
-        with cf.ThreadPoolExecutor(max_workers=workers) as ex:
-            enriched = list(ex.map(enrich, todo))
+        is_b = lambda x: BY_KEY[x["source"]].needs_browser
+        b_items = sorted([x for x in all_new if is_b(x)], key=lambda x: x["pub_date"], reverse=True)
+        h_items = sorted([x for x in all_new if not is_b(x)], key=lambda x: x["pub_date"], reverse=True)
+        b_todo, h_todo = b_items[:browser_limit], h_items[:enrich_limit]
+
+        print(f"补全详情：浏览器 {len(b_todo)} 篇（串行）· 直连 {len(h_todo)} 篇（并发）…", flush=True)
+        enriched: list[dict] = []
+        for x in b_todo:
+            enriched.append(enrich(x))
+        if h_todo:
+            with cf.ThreadPoolExecutor(max_workers=workers) as ex:
+                enriched.extend(ex.map(enrich, h_todo))
+
         added = save(conn, enriched)
-        # 超出补全上限的仍入库（无摘要）
-        rest = [x for x in all_new if x not in todo]
+        done = {x["url"] for x in b_todo} | {x["url"] for x in h_todo}
+        rest = [x for x in all_new if x["url"] not in done]
         if rest:
             added += save(conn, rest)
     else:
         added = 0
+
+    browser.close()
 
     conn.execute(
         "INSERT INTO runs(ts,total,added,note) VALUES(?,?,?,?)",

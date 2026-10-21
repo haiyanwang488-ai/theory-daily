@@ -2,8 +2,10 @@ name: 理论日课 每日更新
 
 on:
   schedule:
-    # UTC 00:30 = 北京时间 08:30
-    - cron: "30 0 * * *"
+    # UTC 02:00 = 北京时间 10:00 —— 抓取 + 推送（党报理论版多在上午 9 点后才齐）
+    - cron: "0 2 * * *"
+    # UTC 13:00 = 北京时间 21:00 —— 只补抓当天傍晚发布的新文章、刷新网页，不重复推送
+    - cron: "0 13 * * *"
   workflow_dispatch: # 支持手动触发，方便调试
     inputs:
       force:
@@ -36,11 +38,24 @@ jobs:
       - name: 安装依赖
         run: pip install -r requirements.txt
 
+      - name: 安装 Chromium（解放日报、文汇报需要渲染）
+        run: python -m playwright install --with-deps chromium
+
       - name: 抓取 · 生成 · 推送
         env:
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
           TZ: Asia/Shanghai
-        run: python morning.py ${{ inputs.force == true && '--force' || '' }}
+        run: |
+          ARGS=""
+          # 21:00 那次只刷新网页；push.py 内部还有「当天已推则跳过」兜底
+          if [ "${{ github.event.schedule }}" = "0 13 * * *" ]; then
+            ARGS="--no-push"
+          fi
+          if [ "${{ inputs.force }}" = "true" ]; then
+            ARGS="$ARGS --force"
+          fi
+          echo "执行: python morning.py $ARGS"
+          python morning.py $ARGS
 
       - name: 提交数据库
         run: |

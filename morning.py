@@ -1,7 +1,12 @@
-"""早上的一次完整流程：确保数据最新 → 推送到微信（当天只推一次）。
+"""每日一次完整流程：确保数据最新 → 推送到微信（当天只推一次）。
 
-8:30 定时触发和开机登录触发都走这里，所以重复执行是安全的：
+定时触发和手动触发都走这里，重复执行是安全的：
 抓取是幂等的（已有的不会重抓），推送有 pushes 表挡重复。
+
+用法：
+    python morning.py               抓取 + 建页 + 推送
+    python morning.py --no-push     只抓取 + 建页（晚间刷新网页用）
+    python morning.py --force       忽略「今天已推过」，强制重推
 """
 
 import sys
@@ -28,7 +33,12 @@ def main() -> int:
         traceback.print_exc()
         return 1
 
-    # 2. 推送（内部判断今天是否已推过，推过就跳过）
+    # 2. 晚间那次只要网页新，不要重复推送
+    if "--no-push" in sys.argv:
+        print("--no-push：已跳过推送")
+        return 0
+
+    # 3. 推送（内部判断今天是否已推过，推过就跳过）
     return push.main()
 
 
