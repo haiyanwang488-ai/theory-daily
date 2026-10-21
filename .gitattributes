@@ -1,0 +1,8 @@
+# 统一用 LF，避免云端脚本因换行符出错
+* text=auto eol=lf
+
+# Windows 批处理必须 CRLF
+*.bat text eol=crlf
+
+# 数据库按二进制处理，不做换行符转换
+*.db binary

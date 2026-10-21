@@ -1,0 +1,16 @@
+# 本地配置含 SendKey，绝不提交
+config.json
+
+# 生成物，由 GitHub Actions 部署到 Pages，不进仓库
+site/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

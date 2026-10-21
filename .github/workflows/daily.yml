@@ -1,0 +1,67 @@
+name: 理论日课 每日更新
+
+on:
+  schedule:
+    # UTC 00:30 = 北京时间 08:30
+    - cron: "30 0 * * *"
+  workflow_dispatch: # 支持手动触发，方便调试
+
+permissions:
+  contents: write # 提交数据库
+  pages: write # 部署网页
+  id-token: write
+
+concurrency:
+  group: theory-daily
+  cancel-in-progress: false
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 抓取 · 生成 · 推送
+        env:
+          SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
+          TZ: Asia/Shanghai
+        run: python morning.py
+
+      - name: 提交数据库
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/theory.db
+          if git diff --staged --quiet; then
+            echo "数据库无变化，跳过提交"
+          else
+            git commit -m "data: $(TZ=Asia/Shanghai date +%Y-%m-%d)"
+            git pull --rebase --autostash
+            git push
+          fi
+
+      - name: 打包网页
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: daily
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 部署到 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
