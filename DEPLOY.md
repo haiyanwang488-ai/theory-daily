@@ -1,5 +1,14 @@
 # 部署到 GitHub Actions（脱离本机运行）
 
+> **当前状态：已部署完成并验证通过（2026-10-21）**
+>
+> - 仓库：https://github.com/haiyanwang488-ai/theory-daily
+> - 网页：https://haiyanwang488-ai.github.io/theory-daily/
+> - Secret `SERVERCHAN_SENDKEY` 已配置，Pages 已开启（workflow 模式）
+> - 首次运行 daily + deploy 均 success，本机定时任务已移除
+>
+> 下面的流程保留作为参考，重装或迁移到新仓库时照做即可。
+
 部署完成后：每天 08:30 由 GitHub 的服务器自动抓取、生成网页、推送到微信。你的电脑关机也照常运行。
 
 ---
@@ -112,3 +121,13 @@ Unregister-ScheduledTask -TaskName "TheoryDaily","TheoryDailyPush" -Confirm:$fal
 3. **免费额度**：Public 仓库的 Actions 不限时长；每次运行约 1-2 分钟。
 4. **数据库每天提交一次**，一年后仓库约几十 MB。如果嫌大，可以定期删历史提交，或者告诉我改成 JSONL 增量存储。
 5. **GitHub Pages 在国内访问可能慢**，但微信推送里的原文链接都是直连媒体站点，不受影响。
+
+---
+
+## 备注：用 API 自动化部署时踩过的坑
+
+如果不想在网页上点，用 API 全自动配置，注意这几点：
+
+- **创建 Pages 必须用 `POST /repos/{owner}/{repo}/pages`**，body `{"build_type": "workflow"}`。用 `PUT` 在 Pages 尚未创建时返回 404（PUT 只能更新已存在的）。
+- **设置 Secret 需要先取公钥再加密**：`GET .../actions/secrets/public-key` 拿 `key` 和 `key_id`，用 libsodium sealed box 加密值，再 `PUT .../actions/secrets/{name}`。
+- **git push 在非交互环境会失败**：`GIT_TERMINAL_PROMPT=0` 会导致 `could not read Username`。需要显式 `GIT_TERMINAL_PROMPT=1` 让凭据管理器弹窗授权。

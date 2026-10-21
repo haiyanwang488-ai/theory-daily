@@ -2,7 +2,12 @@
 
 中文主流媒体理论文章的每日聚合阅读器。抓取 → 清洗去重 → 生成单文件网页。
 
-> **想脱离本机运行？** 见 [DEPLOY.md](DEPLOY.md)：部署到 GitHub Actions 后，每天 08:30 由云端服务器自动抓取、生成网页、推送微信，你的电脑关机也照常。
+**线上地址**：https://haiyanwang488-ai.github.io/theory-daily/
+**仓库**：https://github.com/haiyanwang488-ai/theory-daily
+
+每天 08:30（北京时间）由 GitHub Actions 自动抓取、生成网页、推送微信。电脑无需开机。
+
+> 部署细节见 [DEPLOY.md](DEPLOY.md)。本地仍可手动运行 `更新.bat`。
 
 ## 怎么用
 
