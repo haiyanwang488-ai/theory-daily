@@ -125,7 +125,21 @@ SOURCES: list[Source] = [
         section="理论版",
         note="当日纸质版理论版全文，版面号按日期自动定位",
         weight=96,
-        dynamic="rmrb_layout",
+        dynamic="rmrb",
+    ),
+    Source(
+        key="ce_paper",
+        name="经济日报 · 理论版",
+        short="经济日报理论版",
+        homepage="http://paper.ce.cn/",
+        list_urls=[],  # 由 dynamic 逻辑填充
+        href_re=r"/content/(\d{6})/(\d{2})/content_\d+\.html$",
+        base="http://paper.ce.cn",
+        date_from_href=r"/content/(\d{4})(\d{2})/(\d{2})/content_\d+\.html$",
+        section="理论版",
+        note="当日纸质版理论版全文，中央三报之一",
+        weight=94,
+        dynamic="ce",
     ),
     # ---- 上观新闻旗下（纯前端 SPA，必须浏览器渲染；日期靠列表页相对时间换算）----
     Source(
@@ -206,7 +220,8 @@ TAIL_JUNK_RE = re.compile(r"[\s\-—_|~、·]+$")
 NEWS_BODY_RE = re.compile(r"^(?:本报讯|中国社会科学报[^。]{0,15}讯|新华社[^。]{0,10}电|本报[^。]{0,10}讯|据新华社)")
 NEWS_TITLE_RE = re.compile(
     r"(召开|举行|开幕|闭幕|启动|揭牌|签约|座谈会在|调研|会见|来访|颁奖|启动仪式|论坛在|"
-    r"致信|贺信|祝贺|出席|发表重要讲话|联合宣讲|全网推送|新闻联播|公布.*名单|将部署|宣布|签署)"
+    r"致信|贺信|祝贺|出席|发表重要讲话|联合宣讲|全网推送|新闻联播|公布.*名单|将部署|宣布|签署|"
+    r"一周票房|票房榜|收视率|排行榜)"
 )
 # 理论文章不会只有几百字：短于这个长度的基本是快讯、图文稿、公告、视频文字稿
 THIN_CHARS = 350

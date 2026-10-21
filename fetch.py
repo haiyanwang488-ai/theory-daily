@@ -111,10 +111,24 @@ def parse_list(src: Source, html: str, page_url: str) -> list[dict]:
     return out
 
 
-def rmrb_theory_pages(today: date) -> list[str]:
-    """人民日报电子版：先读当日版面导航，定位标题含「理论」的版面。"""
-    ym = today.strftime("%Y%m")
-    base = f"http://paper.people.com.cn/rmrb/pc/layout/{ym}/{today:%d}/"
+# ------------------------------------- 中央党报电子版（人民日报 / 经济日报）
+
+EPAPER = {
+    "rmrb": {
+        "base": "http://paper.people.com.cn/rmrb/pc/layout/{ym}/{dd}/",
+        "fallback": "node_09.html",   # 人民日报理论版常在第 9 版
+    },
+    "ce": {
+        "base": "http://paper.ce.cn/pc/layout/{ym}/{dd}/",
+        "fallback": "node_10.html",   # 经济日报理论版常在第 10 版
+    },
+}
+
+
+def epaper_theory_pages(key: str, today: date) -> list[str]:
+    """读当日版面导航，定位标题含「理论」的版面；找不到就用固定兜底版。"""
+    cfg = EPAPER[key]
+    base = cfg["base"].format(ym=today.strftime("%Y%m"), dd=f"{today.day:02d}")
     nav = get(base + "node_01.html")
     if not nav:
         return []
@@ -123,9 +137,8 @@ def rmrb_theory_pages(today: date) -> list[str]:
         text = a.get_text(" ", strip=True)
         if "理论" in text and re.search(r"node_\d+\.html", a["href"]):
             pages.append(urljoin(base, a["href"]))
-    # 兜底：第 9 版常为理论版
     if not pages:
-        pages.append(base + "node_09.html")
+        pages.append(base + cfg["fallback"])
     return list(dict.fromkeys(pages))
 
 
@@ -235,8 +248,8 @@ def collect(src: Source, days_back: int = 2) -> list[dict]:
     items: list[dict] = []
 
     urls = list(src.list_urls)
-    if src.dynamic == "rmrb_layout":
-        urls = rmrb_theory_pages(date.today())
+    if src.dynamic:
+        urls = epaper_theory_pages(src.dynamic, date.today())
 
     for u in urls:
         html = get(u)

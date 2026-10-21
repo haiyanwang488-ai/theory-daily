@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 from playwright.sync_api import sync_playwright
 
@@ -45,7 +46,13 @@ class Browser:
                 last_err = e
         raise RuntimeError(f"无法启动任何浏览器：{last_err}")
 
-    def render(self, url: str, wait_ms: int = 2200, timeout_ms: int = 35000) -> str | None:
+    def render(
+        self,
+        url: str,
+        wait_ms: int = 2200,
+        timeout_ms: int = 35000,
+        wait_until: str = "load",
+    ) -> str | None:
         try:
             b = self._ensure()
             ctx = b.new_context(
@@ -56,7 +63,7 @@ class Browser:
             page = ctx.new_page()
             try:
                 # load 比 domcontentloaded 更可靠：等资源加载完，正文才渲染出来
-                page.goto(url, wait_until="load", timeout=timeout_ms)
+                page.goto(url, wait_until=wait_until, timeout=timeout_ms)
                 page.wait_for_timeout(wait_ms)
                 return page.content()
             finally:
@@ -86,8 +93,24 @@ def get() -> Browser:
     return _singleton
 
 
-def render(url: str, wait_ms: int = 2200) -> str | None:
-    return get().render(url, wait_ms=wait_ms)
+def render(url: str, wait_ms: int = 2200, tries: int = 3) -> str | None:
+    """带重试的渲染：首次等 load 完成，失败后退到 domcontentloaded 再试。
+
+    上观系的页面会挂一些慢广告资源，wait_until="load" 偶发超时；
+    退到 domcontentloaded + 加长等待通常仍能拿到完整正文。
+    空壳页面（SPA 未渲染）很短，用长度阈值一并挡掉。
+    """
+    for i in range(tries):
+        html = get().render(
+            url,
+            wait_ms=wait_ms + (600 * i),
+            wait_until="load" if i == 0 else "domcontentloaded",
+        )
+        if html and len(html) >= 3000:
+            return html
+        if i < tries - 1:
+            time.sleep(1.2)
+    return None
 
 
 def close() -> None:
